@@ -34,6 +34,8 @@ targets:
       path: Generated/App-Info.plist
       properties:
         CFBundleDisplayName: Dune Weaver Viewer
+        CFBundleShortVersionString: $(MARKETING_VERSION) # so CI's tag version reaches the app
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleIconFile: AppIcon
         LSApplicationCategoryType: public.app-category.utilities
         UTExportedTypeDeclarations:
@@ -58,6 +60,8 @@ targets:
       path: Generated/Preview-Info.plist
       properties:
         CFBundleDisplayName: Dune Weaver Preview
+        CFBundleShortVersionString: $(MARKETING_VERSION) # so CI's tag version reaches the app
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.quicklook.preview
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewViewController
@@ -80,6 +84,8 @@ targets:
       path: Generated/Thumbnail-Info.plist
       properties:
         CFBundleDisplayName: Dune Weaver Thumbnail
+        CFBundleShortVersionString: $(MARKETING_VERSION) # so CI's tag version reaches the app
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.quicklook.thumbnail
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ThumbnailProvider
