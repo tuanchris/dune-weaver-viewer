@@ -39,6 +39,7 @@ jobs:
           windows/build/Release/check.exe --thumbnail "$pwd\samples\Buckland Down Dorset.thr" "$pwd\smoke\thumbnail.png"
           if ($LASTEXITCODE) { exit 1 }
       - name: Open the app and drive it
+        timeout-minutes: 10
         run: |
           Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty pv | ForEach-Object { "WebView2 Runtime $_" }
           # CDP for the test, and software WebGL (the runner has no GPU). The policy key, as
@@ -55,7 +56,7 @@ jobs:
             netstat -ano | Select-String ':9222'
           }
           exit $code
-      - name: Screenshot the desktop
+      - name: Screenshot the desktop and close the app
         if: always()
         run: |
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -64,6 +65,7 @@ jobs:
           [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
           New-Item -ItemType Directory -Force smoke | Out-Null
           $shot.Save("$pwd\smoke\desktop.png")
+          Stop-Process -Name DuneWeaverViewer -Force -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v7
         with:
           name: windows

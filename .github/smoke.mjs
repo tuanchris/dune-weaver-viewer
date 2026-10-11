@@ -1,5 +1,5 @@
 // CI smoke test: drives the installed Windows app's WebView2 over CDP, checks
-// both pages load the pattern, and saves screenshots into the folder given.
+// both pages load the pattern, and saves a Fast screenshot into the folder given.
 import {chromium} from 'playwright-core';
 
 const out = process.argv[2], sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -10,20 +10,21 @@ const context = browser.contexts()[0];
 const page = context.pages()[0] ?? await context.waitForEvent('page');
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
-const status = () => page.textContent('#status');
 
 await page.waitForFunction(() => /points/.test(document.querySelector('#status')?.textContent), null, {timeout: 30000});
-console.log('Fast:', await status());
+console.log('Fast:', await page.textContent('#status'));
 await sleep(4000);
 await page.screenshot({path: `${out}/fast.png`});
 
-// The runner has no GPU: the engine runs on software WebGL and keeps the page
-// busy for seconds a frame, so one untimed evaluate rather than waiting locators.
+// The runner has no GPU, so the engine runs on software WebGL and saturates it:
+// check that the Sand page draws a couple of frames without errors, then stop
+// (the workflow screenshots the desktop and closes the app).
 await page.click('nav a[data-mode=sand]');
 await page.waitForURL(/index\.html/);
-await sleep(30000);
-console.log('Sand:', await page.evaluate(() => document.getElementById('status').textContent));
-await page.screenshot({path: `${out}/sand.png`, timeout: 180000});
-const final = await page.evaluate(() => document.getElementById('status').textContent);
-if (/unavailable|No theta-rho/.test(final) || errors.length) throw new Error(`Page errors: ${errors.join('; ') || final}`);
+const sand = await page.evaluate(() => new Promise(r => {
+  const tick = () => { const s = document.getElementById('status').textContent; s.startsWith('Loading') ? requestAnimationFrame(tick) : r(s); };
+  tick();
+}));
+console.log('Sand:', sand);
+if (/unavailable|No theta-rho/.test(sand) || errors.length) throw new Error(`Sand page failed: ${errors.join('; ') || sand}`);
 await browser.close();
