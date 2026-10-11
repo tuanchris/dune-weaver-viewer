@@ -30,24 +30,32 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           & $iscc /Q "/DVersion=$version" windows/installer.iss
           if ($LASTEXITCODE) { exit 1 }
-      - name: Install and smoke test
+      - name: Install and render a thumbnail through Explorer
         run: |
           $setup = (Get-ChildItem windows/build/DuneWeaverViewer-*.exe).FullName
           # All users: CI runs elevated, and COM ignores per-user (HKCU) classes in elevated processes.
           Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/ALLUSERS' -Wait
-          $sample = "$pwd\samples\Buckland Down Dorset.thr"
           mkdir smoke
-          windows/build/Release/check.exe --thumbnail $sample "$pwd\smoke\thumbnail.png"
+          windows/build/Release/check.exe --thumbnail "$pwd\samples\Buckland Down Dorset.thr" "$pwd\smoke\thumbnail.png"
           if ($LASTEXITCODE) { exit 1 }
+      - name: Open the app and drive it
+        run: |
+          Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty pv | ForEach-Object { "WebView2 Runtime $_" }
           $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --enable-unsafe-swiftshader'
-          Start-Process "$env:ProgramFiles\Dune Weaver Viewer\DuneWeaverViewer.exe" -ArgumentList "`"$sample`""
+          Start-Process "$env:ProgramFiles\Dune Weaver Viewer\DuneWeaverViewer.exe" -ArgumentList "`"$pwd\samples\Buckland Down Dorset.thr`""
           npm install --no-save --silent playwright-core@1.64.0
           node .github/smoke.mjs smoke
-          if ($LASTEXITCODE) { exit 1 }
+          $code = $LASTEXITCODE
+          Get-Process DuneWeaverViewer, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+          exit $code
+      - name: Screenshot the desktop
+        if: always()
+        run: |
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
           $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
           [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          New-Item -ItemType Directory -Force smoke | Out-Null
           $shot.Save("$pwd\smoke\desktop.png")
       - uses: actions/upload-artifact@v7
         with:
