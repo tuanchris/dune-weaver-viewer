@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fast render</title>
+<!--
+  Fast mode for hosts without a native player (Windows): the path drawn as the
+  ball moves at constant speed, as mac/Shared/PlayerView.swift does. Same
+  hosting contract as index.html: ./pattern.thr, or ?thr=<url>.
+-->
+<link rel="stylesheet" href="style.css">
+<style>
+  #stage > canvas { grid-area: 1 / 1; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="ink" aria-label="Sand table pattern"></canvas><canvas id="ball" aria-hidden="true"></canvas></div>
+<div class="bar">
+  <button id="play" aria-label="Play">▶</button>
+  <input id="seek" type="range" min="0" max="1" step="0.0001" value="0" aria-label="Progress">
+  <select id="speed" aria-label="Speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
+  <nav hidden aria-label="Render mode"><a href="fast.html" data-mode="fast" aria-current="page">Fast</a><a href="index.html" data-mode="sand">Sand</a></nav>
+</div>
+<div id="status" role="status">Loading…</div>
+<script src="modes.js"></script>
+<script type="module">
+import {parseThr, resamplePath} from './engine/sim/thr.js';
+
+const $ = id => document.getElementById(id);
+const DURATION = 30, INSET = .96; // seconds for the drawing at 1x; margin inside the rim
+const TABLE = 'rgb(232 219 196)', GROOVE = 'rgb(107 84 56)', BALL = 'rgb(56 56 61)';
+
+const text = await (await fetch(new URLSearchParams(location.search).get('thr') ?? 'pattern.thr')).text();
+const {coords} = parseThr(text);
+const path = resamplePath(coords, {maxStep: .01});
+const n = path.length / 2;
+const lengths = new Float64Array(n);
+for (let i = 1; i < n; i++) lengths[i] = lengths[i - 1] + Math.hypot(path[2 * i] - path[2 * i - 2], path[2 * i + 1] - path[2 * i - 1]);
+const total = lengths[n - 1] ?? 0;
+$('status').textContent = `${coords.length.toLocaleString()} points`;
+
+// Last point the ball has reached after `f` of the path length.
+const indexAt = f => { let lo = 0, hi = n - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (lengths[m] <= f * total) lo = m; else hi = m - 1; } return lo; };
+
+// Grooves stay on the ink canvas, so each frame strokes only the new segments;
+// scrubbing back or resizing redraws from the start.
+const ink = $('ink').getContext('2d'), ball = $('ball').getContext('2d');
+let side = 0, drawn = 0, progress = 0, playing = n > 0, last = performance.now();
+const at = i => [side / 2 + path[2 * i] * side / 2 * INSET, side / 2 + path[2 * i + 1] * side / 2 * INSET];
+
+function resize() {
+  side = Math.round($('ink').clientWidth * devicePixelRatio);
+  for (const c of [$('ink'), $('ball')]) c.width = c.height = side;
+  ink.fillStyle = TABLE;
+  ink.beginPath(); ink.arc(side / 2, side / 2, side / 2, 0, 2 * Math.PI); ink.fill();
+  Object.assign(ink, {strokeStyle: GROOVE, lineWidth: Math.max(1, side / 600), lineCap: 'round', lineJoin: 'round'});
+  drawn = 0;
+}
+
+function draw() {
+  if (!n) return;
+  const end = indexAt(progress);
+  if (end < drawn) resize();
+  if (end > drawn) {
+    ink.beginPath(); ink.moveTo(...at(drawn));
+    for (let i = drawn + 1; i <= end; i++) ink.lineTo(...at(i));
+    ink.stroke();
+    drawn = end;
+  }
+  ball.clearRect(0, 0, side, side);
+  ball.fillStyle = BALL;
+  ball.beginPath(); ball.arc(...at(end), side * .012, 0, 2 * Math.PI); ball.fill();
+}
+
+function frame(now) {
+  if (playing) {
+    progress = Math.min(1, progress + Math.min((now - last) / 1000, .1) * +$('speed').value / DURATION);
+    if (progress >= 1) setPlaying(false);
+    $('seek').value = progress;
+  }
+  last = now;
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function setPlaying(on) {
+  playing = on;
+  $('play').textContent = on ? '❚❚' : '▶';
+  $('play').setAttribute('aria-label', on ? 'Pause' : 'Play');
+}
+
+$('play').disabled = $('seek').disabled = !n;
+$('play').onclick = () => { if (!playing && progress >= 1) progress = 0; setPlaying(!playing); };
+$('seek').oninput = () => { setPlaying(false); progress = +$('seek').value; };
+addEventListener('keydown', e => { if (e.key === ' ' && e.target.tagName !== 'SELECT') { e.preventDefault(); $('play').click(); } });
+new ResizeObserver(resize).observe($('ink'));
+setPlaying(playing);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

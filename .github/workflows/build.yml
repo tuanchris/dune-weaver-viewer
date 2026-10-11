@@ -1,0 +1,98 @@
+# Builds and checks both platforms; a v* tag also publishes a release with
+# the Windows installer and the Mac app.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: |
+          cmake -S windows -B windows/build -A x64
+          cmake --build windows/build --config Release
+      - name: Format checks
+        run: windows/build/Release/check.exe
+      - name: Installer
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.0' }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc /Q "/DVersion=$version" windows/installer.iss
+          if ($LASTEXITCODE) { exit 1 }
+      - name: Install and smoke test
+        run: |
+          $setup = (Get-ChildItem windows/build/DuneWeaverViewer-*.exe).FullName
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          $sample = "$pwd\samples\Buckland Down Dorset.thr"
+          mkdir smoke
+          windows/build/Release/check.exe --thumbnail $sample "$pwd\smoke\thumbnail.png"
+          if ($LASTEXITCODE) { exit 1 }
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --enable-unsafe-swiftshader'
+          Start-Process "$env:LOCALAPPDATA\Programs\Dune Weaver Viewer\DuneWeaverViewer.exe" -ArgumentList "`"$sample`""
+          npm install --no-save --silent playwright-core@1.64.0
+          node .github/smoke.mjs smoke
+          if ($LASTEXITCODE) { exit 1 }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $shot.Save("$pwd\smoke\desktop.png")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: windows/build/DuneWeaverViewer-*.exe
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-smoke
+          path: smoke
+
+  mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v7
+      - name: Format checks
+        run: mkdir -p build && swiftc -o build/check Shared/ThrPath.swift Tests/main.swift && build/check
+      - name: Build
+        run: |
+          brew install xcodegen
+          version=${GITHUB_REF_NAME#v}; [ "$GITHUB_REF_TYPE" = tag ] || version=0.0.0
+          xcodegen generate --quiet
+          xcodebuild -project DuneWeaverViewer.xcodeproj -scheme DuneWeaverViewer -configuration Release -derivedDataPath build -quiet build MARKETING_VERSION=$version
+          ditto -c -k --keepParent "build/Build/Products/Release/Dune Weaver Viewer.app" "build/DuneWeaverViewer-$version-mac.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mac
+          path: mac/build/DuneWeaverViewer-*-mac.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '{windows,mac}'
+          merge-multiple: true
+          path: dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Dune Weaver Viewer ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md

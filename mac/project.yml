@@ -1,0 +1,93 @@
+name: DuneWeaverViewer
+options:
+  bundleIdPrefix: com.duneweaver
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-" # sign to run locally
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  DuneWeaverViewer:
+    type: application
+    platform: macOS
+    settings:
+      PRODUCT_NAME: Dune Weaver Viewer
+      PRODUCT_BUNDLE_IDENTIFIER: com.duneweaver.viewer
+    sources:
+      - App
+      - Shared
+      - AppIcon.icns
+      - path: ../web # the high-fidelity page, copied whole into Resources/web
+        type: folder
+        buildPhase: resources
+    scheme: {}
+    dependencies:
+      - target: ThrPreview
+      - target: ThrThumbnail
+    info:
+      path: Generated/App-Info.plist
+      properties:
+        CFBundleDisplayName: Dune Weaver Viewer
+        CFBundleIconFile: AppIcon
+        LSApplicationCategoryType: public.app-category.utilities
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.duneweaver.thr
+            UTTypeDescription: Dune Weaver pattern
+            UTTypeConformsTo: [public.data, public.content]
+            UTTypeTagSpecification:
+              public.filename-extension: [thr]
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Dune Weaver pattern
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.duneweaver.thr]
+
+  ThrPreview:
+    type: app-extension
+    platform: macOS
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.duneweaver.viewer.Preview
+    sources: [Preview, Shared]
+    info:
+      path: Generated/Preview-Info.plist
+      properties:
+        CFBundleDisplayName: Dune Weaver Preview
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.preview
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewViewController
+          NSExtensionAttributes:
+            QLSupportedContentTypes: [com.duneweaver.thr]
+            QLSupportsSearchableItems: false
+    entitlements:
+      path: Generated/Preview.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+
+  ThrThumbnail:
+    type: app-extension
+    platform: macOS
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.duneweaver.viewer.Thumbnail
+    sources: [Thumbnail, Shared]
+    info:
+      path: Generated/Thumbnail-Info.plist
+      properties:
+        CFBundleDisplayName: Dune Weaver Thumbnail
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.thumbnail
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ThumbnailProvider
+          NSExtensionAttributes:
+            QLSupportedContentTypes: [com.duneweaver.thr]
+            QLThumbnailMinimumDimension: 0
+    entitlements:
+      path: Generated/Thumbnail.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true

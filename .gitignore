@@ -1,0 +1,6 @@
+mac/build/
+mac/Generated/
+mac/*.xcodeproj/
+.DS_Store
+windows/build/
+node_modules/

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sand render</title>
+<!--
+  High-fidelity mode: the Dune Weaver sand engine (engine/, vendored by sync-engine.sh)
+  simulating the pattern as the table draws it. Platform-neutral: a native host
+  serves this folder and the pattern at ./pattern.thr (or pass ?thr=<url>).
+-->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage"><canvas id="sand" width="2048" height="2048" aria-label="Simulated sand table"></canvas></div>
+<div class="bar">
+  <button id="play" aria-label="Play">▶</button>
+  <input id="seek" type="range" min="0" max="1" step="0.0001" value="1" aria-label="Progress">
+  <select id="speed" aria-label="Speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
+  <select id="profile" aria-label="Table profile"></select>
+  <select id="clear" aria-label="Clear pattern first"><option value="adaptive">clear first</option><option value="none">no clear</option></select>
+  <nav hidden aria-label="Render mode"><a href="fast.html" data-mode="fast">Fast</a><a href="index.html" data-mode="sand" aria-current="page">Sand</a></nav>
+</div>
+<div id="status" role="status">Loading…</div>
+<script src="modes.js"></script>
+<script type="module">
+import {SandSim, DEFAULT_SAND, DEFAULT_RENDER} from './engine/sim/SandSim.js';
+import {parseThr, resamplePath} from './engine/sim/thr.js';
+import {TABLE_PROFILES} from './engine/table-profiles.js';
+
+const $ = id => document.getElementById(id);
+const RES = 2048, DURATION = 30; // seconds for the drawing at 1x, as in fast mode
+const status = text => { $('status').textContent = text; };
+
+// .thr files are in the table's frame; the engine works in sand-weaver's
+// simulator frame, a horizontal reflection of it (sand-weaver thr-orientation.js).
+const toSim = coords => coords.map(({theta, rho}) => ({theta: Math.PI - theta, rho}));
+const fetchCoords = async url => toSim(parseThr(await (await fetch(url)).text()).coords);
+
+let sim, lengths, clearSegs = 0, startL = 0, endL = 0, targetL = 0, playing = false, relaxed = false, last = performance.now();
+try {
+  sim = new SandSim($('sand'), RES);
+} catch (e) { status(`High-fidelity render unavailable: ${e.message}`); throw e; }
+const drawing = await fetchCoords(new URLSearchParams(location.search).get('thr') ?? 'pattern.thr');
+if (!drawing.length) status('No theta-rho points in this file.');
+
+for (const name of Object.keys(TABLE_PROFILES)) $('profile').add(new Option(name, name));
+$('profile').value = 'dwpro-v6';
+$('clear').value = TABLE_PROFILES['dwpro-v6'].clear ?? 'none';
+
+// Path length up to the segment index, and back, so playback runs at constant ball speed.
+const segAt = L => { let lo = 0, hi = lengths.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (lengths[m] <= L) lo = m; else hi = m - 1; } return lo; };
+
+async function load() {
+  if (!drawing.length) return;
+  const profile = TABLE_PROFILES[$('profile').value];
+  const {table, ball, depth} = profile.physical;
+  // Same setup as sand-weaver's render-thr.mjs + dw-preview.js.
+  const sand = profile.sand.model === 1 ? {...profile.sand, floorMm: profile.sand.floorMm ?? depth} : profile.sand;
+  Object.assign(sim.sand, DEFAULT_SAND, sand, {tableDiameterMm: table, ballDiameterMm: ball, depthMm: depth});
+  Object.assign(sim.render, DEFAULT_RENDER, profile.render);
+  const opts = {maxSagitta: .0015 * (1024 / sim.resolution)};
+
+  // The table's clear runs first (sand-weaver clear-patterns.js): from the centre
+  // out when the drawing starts at the rim, else from the rim in. The drawing is
+  // shifted whole turns to start within half a turn of where the clear ends.
+  let coords = drawing;
+  clearSegs = 0;
+  if ($('clear').value === 'adaptive') {
+    const clear = await fetchCoords(`engine/dw-clear/clear_from_${drawing[0].rho < 0.5 ? 'out' : 'in'}_pro.thr`);
+    const turns = 2 * Math.PI * Math.round((clear.at(-1).theta - drawing[0].theta) / (2 * Math.PI));
+    coords = [...clear, ...drawing.map(({theta, rho}) => ({theta: theta + turns, rho}))];
+    clearSegs = resamplePath(clear, opts).length / 2 - 1;
+  }
+  const path = resamplePath(coords, opts);
+  lengths = new Float64Array(path.length / 2);
+  for (let i = 1; i < lengths.length; i++) lengths[i] = lengths[i - 1] + Math.hypot(path[2 * i] - path[2 * i - 2], path[2 * i + 1] - path[2 * i - 1]);
+  startL = lengths[clearSegs]; endL = lengths.at(-1);
+  sim.loadPath(path, {clearSand: true});
+  relaxed = false;
+  targetL = endL;
+}
+
+function seek(L) {
+  targetL = Math.max(startL, Math.min(endL, L));
+  if (segAt(targetL) < sim.cursor) { sim.replay(); relaxed = false; }
+}
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, .1); last = now;
+  if (lengths) {
+    const t0 = performance.now(), target = segAt(targetL);
+    let caughtUp = sim.cursor >= target;
+    // Engine time per frame: smooth while playing, faster to the finished render otherwise.
+    const budget = playing ? 25 : 100;
+    while (!caughtUp && performance.now() - t0 < budget) caughtUp = sim.advance(Math.min(512, target - sim.cursor)) === 0 || sim.cursor >= target;
+    // Playback waits for the engine rather than skipping sand it hasn't simulated.
+    if (playing && caughtUp) {
+      targetL = Math.min(endL, targetL + (endL - startL) / DURATION * +$('speed').value * dt);
+      if (targetL >= endL) setPlaying(false);
+    }
+    if (sim.done && !relaxed && sim.sand.model !== 1) { sim.relax(2); relaxed = true; } // the plow model slumps as it goes
+    sim.draw();
+    const shown = Math.min(lengths[sim.cursor] ?? endL, endL), f = endL > startL ? Math.max(0, shown - startL) / (endL - startL) : 1;
+    if (document.activeElement !== $('seek')) $('seek').value = f;
+    status(sim.cursor < clearSegs ? 'Clearing the table…' : caughtUp ? `${Math.round(f * 100)}% drawn · ${$('profile').value}` : `Simulating… ${Math.round(f * 100)}%`);
+  }
+  requestAnimationFrame(frame);
+}
+
+function setPlaying(on) {
+  playing = on;
+  $('play').textContent = on ? '❚❚' : '▶';
+  $('play').setAttribute('aria-label', on ? 'Pause' : 'Play');
+}
+
+$('play').onclick = () => {
+  if (!playing && targetL >= endL) seek(startL);
+  setPlaying(!playing);
+};
+$('seek').oninput = () => { setPlaying(false); seek(startL + +$('seek').value * (endL - startL)); };
+$('profile').onchange = () => { $('clear').value = TABLE_PROFILES[$('profile').value].clear ?? 'none'; load(); };
+$('clear').onchange = load;
+addEventListener('keydown', e => { if (e.key === ' ' && e.target.tagName !== 'SELECT') { e.preventDefault(); $('play').click(); } });
+
+await load();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
