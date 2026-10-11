@@ -3,9 +3,9 @@
 import {chromium} from 'playwright-core';
 
 const out = process.argv[2], sleep = ms => new Promise(r => setTimeout(r, ms));
-let browser;
-for (let i = 0; !browser && i < 60; i++) browser = await chromium.connectOverCDP('http://127.0.0.1:9222').catch(() => sleep(1000));
-if (!browser) throw new Error('The app never opened its WebView2.');
+let browser, error;
+for (let i = 0; !browser && i < 60; i++) browser = await chromium.connectOverCDP('http://127.0.0.1:9222').catch(e => { error = e; return sleep(1000); });
+if (!browser) throw new Error(`The app's WebView2 never answered on CDP: ${error?.message}`);
 const context = browser.contexts()[0];
 const page = context.pages()[0] ?? await context.waitForEvent('page');
 const errors = [];

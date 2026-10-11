@@ -46,7 +46,10 @@ jobs:
           npm install --no-save --silent playwright-core@1.64.0
           node .github/smoke.mjs smoke
           $code = $LASTEXITCODE
-          Get-Process DuneWeaverViewer, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+          if ($code) {
+            Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Select-Object -First 1 -ExpandProperty CommandLine
+            netstat -ano | Select-String ':9222'
+          }
           exit $code
       - name: Screenshot the desktop
         if: always()
