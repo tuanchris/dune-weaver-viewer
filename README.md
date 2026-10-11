@@ -8,7 +8,7 @@ Thumbnails, previews and playback for Dune Weaver `.thr` sand patterns, on Mac a
 
 Get the latest build from [Releases](https://github.com/tuanchris/dune-weaver-viewer/releases/latest).
 
-- **Windows 10/11 (x64):** run `DuneWeaverViewer-<version>-windows-x64.exe`. It installs for your user, with no admin rights needed. The installer isn't code-signed, so SmartScreen may warn: choose *More info → Run anyway*. The app needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes. On Windows 10, get it from [Microsoft](https://go.microsoft.com/fwlink/p/?LinkId=2124703) if the app asks.
+- **Windows 10/11 (x64):** run `DuneWeaverViewer-<version>-windows-x64.exe`. It installs for your user, with no admin rights needed. Add `/ALLUSERS` to install for everyone. The installer isn't code-signed, so SmartScreen may warn: choose *More info → Run anyway*. The app needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes. On Windows 10, get it from [Microsoft](https://go.microsoft.com/fwlink/p/?LinkId=2124703) if the app asks.
 - **macOS 14+:** unzip `DuneWeaverViewer-<version>-mac.zip` and move **Dune Weaver Viewer** to Applications. It isn't notarized, so clear the download flag once before the first launch:
   ```sh
   xattr -dr com.apple.quarantine "/Applications/Dune Weaver Viewer.app"

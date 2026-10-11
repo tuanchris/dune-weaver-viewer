@@ -33,13 +33,14 @@ jobs:
       - name: Install and smoke test
         run: |
           $setup = (Get-ChildItem windows/build/DuneWeaverViewer-*.exe).FullName
-          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          # All users: CI runs elevated, and COM ignores per-user (HKCU) classes in elevated processes.
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/ALLUSERS' -Wait
           $sample = "$pwd\samples\Buckland Down Dorset.thr"
           mkdir smoke
           windows/build/Release/check.exe --thumbnail $sample "$pwd\smoke\thumbnail.png"
           if ($LASTEXITCODE) { exit 1 }
           $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --enable-unsafe-swiftshader'
-          Start-Process "$env:LOCALAPPDATA\Programs\Dune Weaver Viewer\DuneWeaverViewer.exe" -ArgumentList "`"$sample`""
+          Start-Process "$env:ProgramFiles\Dune Weaver Viewer\DuneWeaverViewer.exe" -ArgumentList "`"$sample`""
           npm install --no-save --silent playwright-core@1.64.0
           node .github/smoke.mjs smoke
           if ($LASTEXITCODE) { exit 1 }
