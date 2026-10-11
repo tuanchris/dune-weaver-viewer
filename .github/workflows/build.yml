@@ -41,7 +41,11 @@ jobs:
       - name: Open the app and drive it
         run: |
           Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty pv | ForEach-Object { "WebView2 Runtime $_" }
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --enable-unsafe-swiftshader'
+          # CDP for the test, and software WebGL (the runner has no GPU). The policy key, as
+          # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS is ignored here.
+          $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          New-Item -Force $policy | Out-Null
+          Set-ItemProperty $policy -Name DuneWeaverViewer.exe -Value '--remote-debugging-port=9222 --enable-unsafe-swiftshader'
           Start-Process "$env:ProgramFiles\Dune Weaver Viewer\DuneWeaverViewer.exe" -ArgumentList "`"$pwd\samples\Buckland Down Dorset.thr`""
           npm install --no-save --silent playwright-core@1.64.0
           node .github/smoke.mjs smoke
