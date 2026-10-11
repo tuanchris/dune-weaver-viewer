@@ -17,10 +17,13 @@ console.log('Fast:', await status());
 await sleep(4000);
 await page.screenshot({path: `${out}/fast.png`});
 
+// The runner has no GPU: the engine runs on software WebGL and keeps the page
+// busy for seconds a frame, so one untimed evaluate rather than waiting locators.
 await page.click('nav a[data-mode=sand]');
 await page.waitForURL(/index\.html/);
-await sleep(20000);
-console.log('Sand:', await status());
-await page.screenshot({path: `${out}/sand.png`});
-if (/unavailable|No theta-rho/.test(await status()) || errors.length) throw new Error(`Page errors: ${errors.join('; ') || await status()}`);
+await sleep(30000);
+console.log('Sand:', await page.evaluate(() => document.getElementById('status').textContent));
+await page.screenshot({path: `${out}/sand.png`, timeout: 180000});
+const final = await page.evaluate(() => document.getElementById('status').textContent);
+if (/unavailable|No theta-rho/.test(final) || errors.length) throw new Error(`Page errors: ${errors.join('; ') || final}`);
 await browser.close();
