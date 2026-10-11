@@ -105,7 +105,8 @@ jobs:
             security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
             security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
             security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-            sign=(CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=95Y63Z8LL9 ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp)
+            # No injected get-task-allow: notarization rejects it, and plain `build` adds it.
+            sign=(CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=95Y63Z8LL9 ENABLE_HARDENED_RUNTIME=YES CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp)
           fi
           xcodebuild -project DuneWeaverViewer.xcodeproj -scheme DuneWeaverViewer -configuration Release -derivedDataPath build -quiet build MARKETING_VERSION=$version "${sign[@]}"
           codesign -dv "build/Build/Products/Release/Dune Weaver Viewer.app" 2>&1 | grep -E 'Authority|TeamIdentifier' || true
