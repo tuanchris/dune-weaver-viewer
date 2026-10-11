@@ -27,7 +27,7 @@ static void render(const ThrPath& path, void* bits, int side) {
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         g.SetPixelOffsetMode(PixelOffsetModeHalf);
         g.Clear(Color(0, 0, 0, 0));
-        SolidBrush table(Color(Sand::table));
+        SolidBrush table{Color(Sand::table)};
         g.FillEllipse(&table, 0.f, 0.f, (REAL)side, (REAL)side);
         Pen groove(Color(Sand::groove), std::max(1.f, side / 600.f));
         groove.SetLineCap(LineCapRound, LineCapRound, DashCapRound);
