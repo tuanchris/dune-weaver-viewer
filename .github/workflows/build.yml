@@ -86,12 +86,49 @@ jobs:
       - name: Format checks
         run: mkdir -p build && swiftc -o build/check Shared/ThrPath.swift Tests/main.swift && build/check
       - name: Build
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           brew install xcodegen
           version=${GITHUB_REF_NAME#v}; [ "$GITHUB_REF_TYPE" = tag ] || version=0.0.0
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           xcodegen generate --quiet
-          xcodebuild -project DuneWeaverViewer.xcodeproj -scheme DuneWeaverViewer -configuration Release -derivedDataPath build -quiet build MARKETING_VERSION=$version
-          ditto -c -k --keepParent "build/Build/Products/Release/Dune Weaver Viewer.app" "build/DuneWeaverViewer-$version-mac.zip"
+          # Developer ID signing (Dune Weaver Inc.) when the certificate secret is set; ad hoc otherwise, as on forks.
+          sign=()
+          if [ -n "$CERTIFICATE_P12" ]; then
+            keychain=$RUNNER_TEMP/signing.keychain-db password=$(uuidgen)
+            security create-keychain -p "$password" "$keychain"
+            security set-keychain-settings -lut 3600 "$keychain"
+            security unlock-keychain -p "$password" "$keychain"
+            echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+            security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+            security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+            sign=(CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM=95Y63Z8LL9 ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp)
+          fi
+          xcodebuild -project DuneWeaverViewer.xcodeproj -scheme DuneWeaverViewer -configuration Release -derivedDataPath build -quiet build MARKETING_VERSION=$version "${sign[@]}"
+          codesign -dv "build/Build/Products/Release/Dune Weaver Viewer.app" 2>&1 | grep -E 'Authority|TeamIdentifier' || true
+      - name: Notarize
+        if: github.ref_type == 'tag'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ]; then echo "::warning::No App Store Connect key secrets, so this build isn't notarized."; exit 0; fi
+          app="build/Build/Products/Release/Dune Weaver Viewer.app"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/key.p8"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --key "$RUNNER_TEMP/key.p8" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json | tee "$RUNNER_TEMP/notary.json"
+          if [ "$(plutil -extract status raw "$RUNNER_TEMP/notary.json")" != Accepted ]; then
+            xcrun notarytool log "$(plutil -extract id raw "$RUNNER_TEMP/notary.json")" --key "$RUNNER_TEMP/key.p8" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
+            exit 1
+          fi
+          xcrun stapler staple "$app"
+          spctl --assess --type execute -vv "$app"
+      - name: Zip
+        run: ditto -c -k --keepParent "build/Build/Products/Release/Dune Weaver Viewer.app" "build/DuneWeaverViewer-$VERSION-mac.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: mac
