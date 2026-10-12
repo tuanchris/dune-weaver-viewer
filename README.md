@@ -9,10 +9,7 @@ Thumbnails, previews and playback for Dune Weaver `.thr` sand patterns, on Mac a
 Get the latest build from [Releases](https://github.com/tuanchris/dune-weaver-viewer/releases/latest).
 
 - **Windows 10/11 (x64):** run `DuneWeaverViewer-<version>-windows-x64.exe`. It installs for your user, with no admin rights needed. Add `/ALLUSERS` to install for everyone. The installer isn't code-signed, so SmartScreen may warn: choose *More info → Run anyway*. The app needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes. On Windows 10, get it from [Microsoft](https://go.microsoft.com/fwlink/p/?LinkId=2124703) if the app asks.
-- **macOS 14+:** unzip `DuneWeaverViewer-<version>-mac.zip` and move **Dune Weaver Viewer** to Applications. It isn't notarized, so clear the download flag once before the first launch:
-  ```sh
-  xattr -dr com.apple.quarantine "/Applications/Dune Weaver Viewer.app"
-  ```
+- **macOS 14+:** unzip `DuneWeaverViewer-<version>-mac.zip` and move **Dune Weaver Viewer** to Applications. It's signed and notarized by Dune Weaver Inc.
 
 ## What it does
 
@@ -82,6 +79,12 @@ python3 -m http.server -d . 8765
 ## Release
 
 Push a tag such as `v1.0.1`. CI builds both platforms and attaches the installer and the Mac zip to a new release, using `.github/release-notes.md` as the notes.
+
+The Mac app is signed with Dune Weaver Inc.'s Developer ID and notarized. That needs these repo secrets:
+- `MACOS_CERTIFICATE_P12` and `MACOS_CERTIFICATE_PASSWORD`: the certificate (base64) and its password.
+- `ASC_KEY_P8`, `ASC_KEY_ID` and `ASC_ISSUER_ID`: an App Store Connect API key, used for notarization.
+
+Without them (on forks, for example), the app is ad hoc signed instead. If notarization fails with *a required agreement is missing or has expired*, the team's Account Holder needs to accept the updated Apple Developer Program License Agreement at developer.apple.com.
 
 ## License
 

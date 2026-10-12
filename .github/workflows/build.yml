@@ -112,6 +112,7 @@ jobs:
           codesign -dv "build/Build/Products/Release/Dune Weaver Viewer.app" 2>&1 | grep -E 'Authority|TeamIdentifier' || true
       - name: Notarize
         if: github.ref_type == 'tag'
+        timeout-minutes: 60 # Apple's queue can stall for hours; rerun the job rather than hang
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
