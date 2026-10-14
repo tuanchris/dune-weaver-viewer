@@ -20,7 +20,9 @@ Get the latest build from [Releases](https://github.com/tuanchris/dune-weaver-vi
 | Double-click to play | app, **Fast** and **Sand** modes | app, **Fast** and **Sand** modes |
 
 - **Fast** draws the path at constant ball speed with a ball marker. It's instant, even for patterns with 150k+ points.
-- **Sand** runs the Dune Weaver sand engine (WebGL2): the same physics as the simulator, with the table's clear pattern run first. It has a profile picker, with `dwpro-v6` as the default. A large pattern takes 20-50 s to finish.
+- **Sand** runs the Dune Weaver sand engine (WebGL2): the same physics as the simulator, with the table's clear pattern run first. It has a table picker that remembers the last choice. The choices are DWP (700 mm), DWMP (250 mm) and DWG (395 mm sand bed). Each table runs the clear the Dune Weaver app picks for it: `_pro`, `_mini`, and the OG's for Gold. There's also a profile picker, with `dwpro-v6` as the default. The profiles are calibrated on the DWP, and the other tables use them as they are. A large pattern takes 20-50 s to finish.
+  - The clears aren't simulated on every open. For `dwpro-v6`, the sand each clear leaves is baked into `web/clears/`: every table, from the rim and from the centre. For the other profiles, the page keeps the cleared sand once it's simulated it. A load, a profile switch back, or a replay then starts from the cleared table.
+- The sand view shows the steel ball, drawn over the engine's render: the room reflected dark in the middle, the LED ring as a bright band near the rim, and a soft shadow in the sand.
 
 Both modes show what the table draws, in the Dune Weaver app's orientation. Files are read in the table's frame, and the Sand page reflects them into the engine's simulator frame (θ → π − θ). A `simulator.thr` (simulator frame, no orientation header) therefore shows mirrored, as it would draw on the table.
 
@@ -39,7 +41,8 @@ Both modes show what the table draws, in the Dune Weaver app's orientation. File
   - `index.html` is Sand.
   - `fast.html` is Fast, for hosts without a native player.
   - `?modes` adds a Fast | Sand switch that remembers the last choice.
-  - `engine/` is a vendored copy of the sand engine. `sync-engine.sh` refreshes it from a sand-weaver checkout, where the engine is developed.
+  - `engine/` is a vendored copy of the sand engine. `sync-engine.sh` refreshes it from a sand-weaver checkout, where the engine is developed, and refreshes the tables' clear patterns (`engine/dw-clear/`) from a dune-weaver checkout.
+  - `clears.js` holds the tables, their clears and the engine setup, shared by the page and `bake-clears.mjs`. That script writes `clears/`, 16-bit heights, about 23 MB for the six. Re-run it after `sync-engine.sh` or a change to `dwpro-v6` with `npm install --no-save --prefix . playwright-core@1.64.0 && node web/bake-clears.mjs` (needs Chrome). Each file's name carries a hash of the engine, the clear and the sand settings, so the page never loads a stale one. Until a re-bake, it simulates the clears.
 - `mac/`: the SwiftUI app (`App/`), the Quick Look preview and thumbnail extensions, and the native renderer they share (`Shared/ThrPath.swift`, `Shared/PlayerView.swift`).
   - `project.yml` is the xcodegen spec.
   - `Tests/main.swift` checks the format semantics above.

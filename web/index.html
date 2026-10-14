@@ -12,11 +12,12 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="stage"><canvas id="sand" width="2048" height="2048" aria-label="Simulated sand table"></canvas></div>
+<div id="stage"><canvas id="sand" width="2048" height="2048" aria-label="Simulated sand table"></canvas><canvas id="ball" width="2048" height="2048" aria-hidden="true"></canvas></div>
 <div class="bar">
   <button id="play" aria-label="Play">▶</button>
   <input id="seek" type="range" min="0" max="1" step="0.0001" value="1" aria-label="Progress">
   <select id="speed" aria-label="Speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option><option>8</option></select>
+  <select id="table" aria-label="Table"><option>DWP</option><option>DWMP</option><option>DWG</option></select>
   <select id="profile" aria-label="Table profile"></select>
   <select id="clear" aria-label="Clear pattern first"><option value="adaptive">clear first</option><option value="none">no clear</option></select>
   <nav hidden aria-label="Render mode"><a href="fast.html" data-mode="fast">Fast</a><a href="index.html" data-mode="sand" aria-current="page">Sand</a></nav>
@@ -24,25 +25,23 @@
 <div id="status" role="status">Loading…</div>
 <script src="modes.js"></script>
 <script type="module">
-import {SandSim, DEFAULT_SAND, DEFAULT_RENDER} from './engine/sim/SandSim.js';
-import {parseThr, resamplePath} from './engine/sim/thr.js';
+import {SandSim} from './engine/sim/SandSim.js';
+import {resamplePath} from './engine/sim/thr.js';
 import {TABLE_PROFILES} from './engine/table-profiles.js';
+import {RES, BAKED_PROFILE, TABLES, fetchCoords, configure, clearUrl, clearPath, keptAt, takeSnap, restoreSnap, bakedName, bakedUrl, decode} from './clears.js';
 
 const $ = id => document.getElementById(id);
-const RES = 2048, DURATION = 30; // seconds for the drawing at 1x, as in fast mode
+const DURATION = 30; // seconds for the drawing at 1x, as in fast mode
 const status = text => { $('status').textContent = text; };
 
-// .thr files are in the table's frame; the engine works in sand-weaver's
-// simulator frame, a horizontal reflection of it (sand-weaver thr-orientation.js).
-const toSim = coords => coords.map(({theta, rho}) => ({theta: Math.PI - theta, rho}));
-const fetchCoords = async url => toSim(parseThr(await (await fetch(url)).text()).coords);
-
-let sim, lengths, clearSegs = 0, startL = 0, endL = 0, targetL = 0, playing = false, relaxed = false, last = performance.now();
+let sim, path, lengths, clearSegs = 0, startL = 0, endL = 0, targetL = 0, playing = false, relaxed = false, last = performance.now();
 try {
   sim = new SandSim($('sand'), RES);
 } catch (e) { status(`High-fidelity render unavailable: ${e.message}`); throw e; }
 const drawing = await fetchCoords(new URLSearchParams(location.search).get('thr') ?? 'pattern.thr');
 if (!drawing.length) status('No theta-rho points in this file.');
+
+try { const saved = localStorage.getItem('table'); if (Object.hasOwn(TABLES, saved)) $('table').value = saved; } catch {}
 
 for (const name of Object.keys(TABLE_PROFILES)) $('profile').add(new Option(name, name));
 $('profile').value = 'dwpro-v6';
@@ -51,45 +50,90 @@ $('clear').value = TABLE_PROFILES['dwpro-v6'].clear ?? 'none';
 // Path length up to the segment index, and back, so playback runs at constant ball speed.
 const segAt = L => { let lo = 0, hi = lengths.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (lengths[m] <= L) lo = m; else hi = m - 1; } return lo; };
 
+// The clear is always resampled alike, so its sand can be kept, and the sand starts
+// as the clear left it when that's kept or baked.
 async function load() {
   if (!drawing.length) return;
-  const profile = TABLE_PROFILES[$('profile').value];
-  const {table, ball, depth} = profile.physical;
-  // Same setup as sand-weaver's render-thr.mjs + dw-preview.js.
-  const sand = profile.sand.model === 1 ? {...profile.sand, floorMm: profile.sand.floorMm ?? depth} : profile.sand;
-  Object.assign(sim.sand, DEFAULT_SAND, sand, {tableDiameterMm: table, ballDiameterMm: ball, depthMm: depth});
-  Object.assign(sim.render, DEFAULT_RENDER, profile.render);
-  const opts = {maxSagitta: .0015 * (1024 / sim.resolution)};
+  const table = $('table').value, profile = $('profile').value, fromRim = drawing[0].rho < 0.5;
+  configure(sim, table, profile);
 
-  // The table's clear runs first (sand-weaver clear-patterns.js): from the centre
-  // out when the drawing starts at the rim, else from the rim in. The drawing is
-  // shifted whole turns to start within half a turn of where the clear ends.
-  let coords = drawing;
-  clearSegs = 0;
+  // The table's clear runs first (clears.js). The drawing is shifted whole turns to
+  // start within half a turn of where the clear ends.
+  let head = new Float32Array(0), tail = drawing;
   if ($('clear').value === 'adaptive') {
-    const clear = await fetchCoords(`engine/dw-clear/clear_from_${drawing[0].rho < 0.5 ? 'out' : 'in'}_pro.thr`);
+    const clear = await fetchCoords(clearUrl(table, fromRim));
     const turns = 2 * Math.PI * Math.round((clear.at(-1).theta - drawing[0].theta) / (2 * Math.PI));
-    coords = [...clear, ...drawing.map(({theta, rho}) => ({theta: theta + turns, rho}))];
-    clearSegs = resamplePath(clear, opts).length / 2 - 1;
+    head = clearPath(sim, clear);
+    tail = [clear.at(-1), ...drawing.map(({theta, rho}) => ({theta: theta + turns, rho}))];
   }
-  const path = resamplePath(coords, opts);
+  const rest = resamplePath(tail, {maxSagitta: .0015 * (1024 / sim.resolution)}).subarray(head.length ? 2 : 0); // its first point ends the clear
+  path = new Float32Array(head.length + rest.length);
+  path.set(head); path.set(rest, head.length);
+  clearSegs = Math.max(0, head.length / 2 - 1);
   lengths = new Float64Array(path.length / 2);
   for (let i = 1; i < lengths.length; i++) lengths[i] = lengths[i - 1] + Math.hypot(path[2 * i] - path[2 * i - 2], path[2 * i + 1] - path[2 * i - 1]);
   startL = lengths[clearSegs]; endL = lengths.at(-1);
   sim.loadPath(path, {clearSand: true});
+  snapAt = keptAt(clearSegs);
+  const key = [table, profile, $('clear').value].join();
+  if (key !== snapKey) {
+    snapKey = key;
+    snap = clearSegs && profile === BAKED_PROFILE ? await fetch(bakedUrl(await bakedName(sim, table, fromRim))).then(r => r.ok ? r.arrayBuffer() : null).then(b => b && decode(b)).catch(() => null) : null;
+    if (snap?.cursor !== snapAt) snap = null; // baked for another path
+  }
+  if (snap) restoreSnap(sim, snap);
   relaxed = false;
   targetL = endL;
 }
 
+// The sand as the clear left it (once per table, profile and clear): baked for
+// BAKED_PROFILE, else kept by the live view on its way through. Loads and replays
+// begin from it instead of simulating the clear.
+let snap = null, snapKey = '', snapAt = 0;
+
+// The ball at path length L, between path points, in the view's frame: the render
+// shows the table turned 180° from the engine's (shaders.js).
+function ballAt(L) {
+  const i = Math.max(0, Math.min(segAt(L), lengths.length - 2)), j = Math.min(i + 1, lengths.length - 1);
+  const f = lengths[j] > lengths[i] ? Math.min(1, Math.max(0, (L - lengths[i]) / (lengths[j] - lengths[i]))) : 0, s = sim.pathScale;
+  return [-(path[2 * i] + (path[2 * j] - path[2 * i]) * f) * s, -(path[2 * i + 1] + (path[2 * j + 1] - path[2 * i + 1]) * f) * s];
+}
+
+// The steel ball, which the engine leaves out: the room above reflected dark in the
+// middle, the table's LED ring as a bright band near the rim, the sand at the edge,
+// a glint, and a soft shadow in the sand.
+function drawBall(ctx, x, y, r) {
+  const fill = (paint, cx, cy, cr) => { ctx.fillStyle = paint; ctx.beginPath(); ctx.arc(cx, cy, cr, 0, 2 * Math.PI); ctx.fill(); };
+  const shadow = ctx.createRadialGradient(x, y + r * .15, r * .6, x, y + r * .15, r * 1.35);
+  shadow.addColorStop(0, 'rgb(0 0 0 / .45)'); shadow.addColorStop(1, 'rgb(0 0 0 / 0)');
+  fill(shadow, x, y + r * .15, r * 1.35);
+  const steel = ctx.createRadialGradient(x - r * .2, y - r * .2, 0, x, y, r);
+  for (const [at, c] of [[0, '#4a4d52'], [.45, '#5d6066'], [.72, '#a9adb3'], [.86, '#f4f5f6'], [.93, '#9a958d'], [1, '#2a2826']]) steel.addColorStop(at, c);
+  fill(steel, x, y, r);
+  const glint = ctx.createRadialGradient(x - r * .38, y - r * .38, 0, x - r * .38, y - r * .38, r * .3);
+  glint.addColorStop(0, 'rgb(255 255 255 / .95)'); glint.addColorStop(1, 'rgb(255 255 255 / 0)');
+  fill(glint, x - r * .38, y - r * .38, r * .3);
+}
+
+// The live view's ball, on a canvas over the sand's.
+const ballCtx = $('ball').getContext('2d');
+let ballBox = null;
+function showBall([bx, by]) {
+  if (ballBox) ballCtx.clearRect(...ballBox);
+  const r = sim.ballRadiusWorld * RES / 2, x = (bx + 1) * RES / 2, y = (1 - by) * RES / 2;
+  drawBall(ballCtx, x, y, r);
+  ballBox = [x - 2 * r, y - 2 * r, 4 * r, 4 * r];
+}
+
 function seek(L) {
   targetL = Math.max(startL, Math.min(endL, L));
-  if (segAt(targetL) < sim.cursor) { sim.replay(); relaxed = false; }
+  if (segAt(targetL) < sim.cursor) { sim.replay(); if (snap) restoreSnap(sim, snap); relaxed = false; }
 }
 
 function frame(now) {
   const dt = Math.min((now - last) / 1000, .1); last = now;
   if (lengths) {
-    const t0 = performance.now(), target = segAt(targetL);
+    const t0 = performance.now(), target = Math.min(segAt(targetL), snap || !clearSegs ? Infinity : snapAt);
     let caughtUp = sim.cursor >= target;
     // Engine time per frame: smooth while playing, faster to the finished render otherwise.
     const budget = playing ? 25 : 100;
@@ -99,11 +143,13 @@ function frame(now) {
       targetL = Math.min(endL, targetL + (endL - startL) / DURATION * +$('speed').value * dt);
       if (targetL >= endL) setPlaying(false);
     }
+    if (!snap && clearSegs && sim.cursor === snapAt) snap = takeSnap(sim);
     if (sim.done && !relaxed && sim.sand.model !== 1) { sim.relax(2); relaxed = true; } // the plow model slumps as it goes
     sim.draw();
+    showBall(ballAt(Math.min(targetL, lengths[sim.cursor] ?? endL)));
     const shown = Math.min(lengths[sim.cursor] ?? endL, endL), f = endL > startL ? Math.max(0, shown - startL) / (endL - startL) : 1;
     if (document.activeElement !== $('seek')) $('seek').value = f;
-    status(sim.cursor < clearSegs ? 'Clearing the table…' : caughtUp ? `${Math.round(f * 100)}% drawn · ${$('profile').value}` : `Simulating… ${Math.round(f * 100)}%`);
+    status(sim.cursor < clearSegs ? 'Clearing the table…' : caughtUp ? `${Math.round(f * 100)}% drawn · ${$('table').value} · ${$('profile').value}` : `Simulating… ${Math.round(f * 100)}%`);
   }
   requestAnimationFrame(frame);
 }
@@ -120,7 +166,8 @@ $('play').onclick = () => {
 };
 $('seek').oninput = () => { setPlaying(false); seek(startL + +$('seek').value * (endL - startL)); };
 $('profile').onchange = () => { $('clear').value = TABLE_PROFILES[$('profile').value].clear ?? 'none'; load(); };
-$('clear').onchange = load;
+$('clear').onchange = () => load();
+$('table').onchange = () => { try { localStorage.setItem('table', $('table').value); } catch {} load(); };
 addEventListener('keydown', e => { if (e.key === ' ' && e.target.tagName !== 'SELECT') { e.preventDefault(); $('play').click(); } });
 
 await load();

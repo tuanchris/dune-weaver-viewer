@@ -4,6 +4,8 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px -apple-system, system-ui, "Segoe UI", sans-serif; }
   body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
   #stage { flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; }
+  #stage > canvas { grid-area: 1 / 1; }
+  #ball { pointer-events: none; }
   canvas { width: min(100%, 100cqh); aspect-ratio: 1; max-height: 100%; border-radius: 50%; }
   .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
